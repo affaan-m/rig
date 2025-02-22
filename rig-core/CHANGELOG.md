@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1](https://github.com/0xPlaygrounds/rig/compare/rig-core-v0.9.0...rig-core-v0.9.1) - 2025-02-22
+
+### Added
+
+- support together AI (#230)
+
+### Fixed
+
+- *(loaders)* bump lodpf to allow more PDFs to parse correctly (#307)
+
 ## [0.9.0](https://github.com/0xPlaygrounds/rig/compare/rig-core-v0.8.0...rig-core-v0.9.0) - 2025-02-17
 
 ### Added
