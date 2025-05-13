@@ -39,7 +39,7 @@
 //! let extractor = client.extractor::<serde_json::Value>("llama3.2");
 //! ```
 use crate::json_utils::merge_inplace;
-use crate::streaming::{StreamingChoice, StreamingCompletionModel, StreamingResult};
+use crate::streaming::{RawStreamingChoice, StreamingCompletionModel};
 use crate::{
     agent::AgentBuilder,
     completion::{self, CompletionError, CompletionRequest},
@@ -47,7 +47,7 @@ use crate::{
     extractor::ExtractorBuilder,
     json_utils, message,
     message::{ImageDetail, Text},
-    Embed, OneOrMany,
+    streaming, Embed, OneOrMany,
 };
 use async_stream::stream;
 use futures::StreamExt;
@@ -325,8 +325,27 @@ impl CompletionModel {
         &self,
         completion_request: CompletionRequest,
     ) -> Result<Value, CompletionError> {
+        // Build up the order of messages (context, chat_history)
+        let mut partial_history = vec![];
+        if let Some(docs) = completion_request.normalized_documents() {
+            partial_history.push(docs);
+        }
+        partial_history.extend(completion_request.chat_history);
+
+        // Initialize full history with preamble (or empty if non-existent)
+        let mut full_history: Vec<Message> = completion_request
+            .preamble
+            .map_or_else(Vec::new, |preamble| vec![Message::system(&preamble)]);
+
+        // Convert and extend the rest of the history
+        full_history.extend(
+            partial_history
+                .into_iter()
+                .map(|msg| msg.try_into())
+                .collect::<Result<Vec<Message>, _>>()?,
+        );
+
         // Convert internal prompt into a provider Message
-        let prompt: Message = completion_request.prompt_with_context().try_into()?;
         let options = if let Some(extra) = completion_request.additional_params {
             json_utils::merge(
                 json!({ "temperature": completion_request.temperature }),
@@ -335,16 +354,6 @@ impl CompletionModel {
         } else {
             json!({ "temperature": completion_request.temperature })
         };
-
-        // Chat mode: assemble full conversation history including preamble and chat history
-        let mut full_history = Vec::new();
-        if let Some(preamble) = completion_request.preamble {
-            full_history.push(Message::system(&preamble));
-        }
-        for msg in completion_request.chat_history.into_iter() {
-            full_history.push(Message::try_from(msg)?);
-        }
-        full_history.push(prompt);
 
         let mut request_payload = json!({
             "model": self.model,
@@ -405,8 +414,25 @@ impl completion::CompletionModel for CompletionModel {
     }
 }
 
+#[derive(Clone)]
+pub struct StreamingCompletionResponse {
+    pub done_reason: Option<String>,
+    pub total_duration: Option<u64>,
+    pub load_duration: Option<u64>,
+    pub prompt_eval_count: Option<u64>,
+    pub prompt_eval_duration: Option<u64>,
+    pub eval_count: Option<u64>,
+    pub eval_duration: Option<u64>,
+}
+
 impl StreamingCompletionModel for CompletionModel {
-    async fn stream(&self, request: CompletionRequest) -> Result<StreamingResult, CompletionError> {
+    type StreamingResponse = StreamingCompletionResponse;
+
+    async fn stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<streaming::StreamingCompletionResponse<Self::StreamingResponse>, CompletionError>
+    {
         let mut request_payload = self.create_completion_request(request)?;
         merge_inplace(&mut request_payload, json!({"stream": true}));
 
@@ -426,7 +452,7 @@ impl StreamingCompletionModel for CompletionModel {
             return Err(CompletionError::ProviderError(err_text));
         }
 
-        Ok(Box::pin(stream! {
+        let stream = Box::pin(stream! {
             let mut stream = response.bytes_stream();
             while let Some(chunk_result) = stream.next().await {
                 let chunk = match chunk_result {
@@ -456,22 +482,40 @@ impl StreamingCompletionModel for CompletionModel {
                     match response.message {
                         Message::Assistant{ content, tool_calls, .. } => {
                             if !content.is_empty() {
-                                yield Ok(StreamingChoice::Message(content))
+                                yield Ok(RawStreamingChoice::Message(content))
                             }
 
                             for tool_call in tool_calls.iter() {
                                 let function = tool_call.function.clone();
 
-                                yield Ok(StreamingChoice::ToolCall(function.name, "".to_string(), function.arguments));
+                                yield Ok(RawStreamingChoice::ToolCall {
+                                    id: "".to_string(),
+                                    name: function.name,
+                                    arguments: function.arguments
+                                });
                             }
                         }
                         _ => {
                             continue;
                         }
                     }
+
+                    if response.done {
+                        yield Ok(RawStreamingChoice::FinalResponse(StreamingCompletionResponse {
+                            total_duration: response.total_duration,
+                            load_duration: response.load_duration,
+                            prompt_eval_count: response.prompt_eval_count,
+                            prompt_eval_duration: response.prompt_eval_duration,
+                            eval_count: response.eval_count,
+                            eval_duration: response.eval_duration,
+                            done_reason: response.done_reason,
+                        }));
+                    }
                 }
             }
-        }))
+        });
+
+        Ok(streaming::StreamingCompletionResponse::new(stream))
     }
 }
 

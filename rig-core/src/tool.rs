@@ -205,6 +205,28 @@ where
 }
 
 #[cfg(feature = "mcp")]
+impl From<&mcp_core::types::Tool> for ToolDefinition {
+    fn from(val: &mcp_core::types::Tool) -> Self {
+        Self {
+            name: val.name.to_owned(),
+            description: val.description.to_owned().unwrap_or_default(),
+            parameters: val.input_schema.to_owned(),
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
+impl From<mcp_core::types::Tool> for ToolDefinition {
+    fn from(val: mcp_core::types::Tool) -> Self {
+        Self {
+            name: val.name,
+            description: val.description.unwrap_or_default(),
+            parameters: val.input_schema,
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
 #[derive(Debug, thiserror::Error)]
 #[error("MCP tool error: {0}")]
 pub struct McpToolError(String);
@@ -258,8 +280,8 @@ where
             if result.is_error.unwrap_or(false) {
                 if let Some(error) = result.content.first() {
                     match error {
-                        mcp_core::types::ToolResponseContent::Text { text } => {
-                            return Err(McpToolError(text.clone()).into());
+                        mcp_core::types::ToolResponseContent::Text(text_content) => {
+                            return Err(McpToolError(text_content.text.clone()).into());
                         }
                         _ => return Err(McpToolError("Unsuppported error type".to_string()).into()),
                     }
@@ -272,19 +294,29 @@ where
                 .content
                 .into_iter()
                 .map(|c| match c {
-                    mcp_core::types::ToolResponseContent::Text { text } => text,
-                    mcp_core::types::ToolResponseContent::Image { data, mime_type } => {
-                        format!("data:{};base64,{}", mime_type, data)
+                    mcp_core::types::ToolResponseContent::Text(text_content) => text_content.text,
+                    mcp_core::types::ToolResponseContent::Image(image_content) => {
+                        format!(
+                            "data:{};base64,{}",
+                            image_content.mime_type, image_content.data
+                        )
                     }
-                    mcp_core::types::ToolResponseContent::Resource {
-                        resource: mcp_core::types::ResourceContents { uri, mime_type },
-                    } => {
+                    mcp_core::types::ToolResponseContent::Audio(audio_content) => {
+                        format!(
+                            "data:{};base64,{}",
+                            audio_content.mime_type, audio_content.data
+                        )
+                    }
+
+                    mcp_core::types::ToolResponseContent::Resource(embedded_resource) => {
                         format!(
                             "{}{}",
-                            mime_type
+                            embedded_resource
+                                .resource
+                                .mime_type
                                 .map(|m| format!("data:{};", m))
                                 .unwrap_or_default(),
-                            uri
+                            embedded_resource.resource.uri
                         )
                     }
                 })

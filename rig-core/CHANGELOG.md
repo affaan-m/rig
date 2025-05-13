@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/0xPlaygrounds/rig/compare/rig-core-v0.11.1...rig-core-v0.12.0) - 2025-04-29
+
+### Added
+
+- add gpt-image-1 ([#418](https://github.com/0xPlaygrounds/rig/pull/418))
+- multi-turn / reasoning loops + parallel tool calling ([#370](https://github.com/0xPlaygrounds/rig/pull/370))
+
+### Fixed
+
+- system and developer messages for openai ([#430](https://github.com/0xPlaygrounds/rig/pull/430))
+- o-series models + constants ([#426](https://github.com/0xPlaygrounds/rig/pull/426))
+- dynamically pull rag text from chat history ([#425](https://github.com/0xPlaygrounds/rig/pull/425))
+- rig tool macro struct not public ([#409](https://github.com/0xPlaygrounds/rig/pull/409))
+- function call conversion typo ([#415](https://github.com/0xPlaygrounds/rig/pull/415))
+- deepseek function call conversion typo ([#414](https://github.com/0xPlaygrounds/rig/pull/414))
+
+### Other
+
+- Donot use async closure + Bump mcp-core ([#428](https://github.com/0xPlaygrounds/rig/pull/428))
+- Remove broken xAI reference link in embedding.rs ([#427](https://github.com/0xPlaygrounds/rig/pull/427))
+- Style/trace gemini embedding ([#411](https://github.com/0xPlaygrounds/rig/pull/411))
+- Update agent_with_huggingface.rs ([#401](https://github.com/0xPlaygrounds/rig/pull/401))
+
+## [0.11.1](https://github.com/0xPlaygrounds/rig/compare/rig-core-v0.11.0...rig-core-v0.11.1) - 2025-04-12
+
+### Added
+
+- trait for embedding images ([#396](https://github.com/0xPlaygrounds/rig/pull/396))
+- Add `rig_tool` macro ([#353](https://github.com/0xPlaygrounds/rig/pull/353))
+- impl From<mcp_core::types::Tool> for ToolDefinition ([#385](https://github.com/0xPlaygrounds/rig/pull/385))
+- AWS Bedrock provider ([#318](https://github.com/0xPlaygrounds/rig/pull/318))
+
+### Fixed
+
+- gemini embeddings does not work for multiple documents ([#386](https://github.com/0xPlaygrounds/rig/pull/386))
+- deserialization error due to serde rename of tool result ([#374](https://github.com/0xPlaygrounds/rig/pull/374))
+
+### Other
+
+- Updated broken link xaiAPI in `completion.rs` ([#384](https://github.com/0xPlaygrounds/rig/pull/384))
+- Fix Clippy warnings for doc indentation and Error::other usage ([#364](https://github.com/0xPlaygrounds/rig/pull/364))
+
+## [0.11.0](https://github.com/0xPlaygrounds/rig/compare/rig-core-v0.10.0...rig-core-v0.11.0) - 2025-03-31
+
+### Added
+
+- Add audio generation to all providers ([#359](https://github.com/0xPlaygrounds/rig/pull/359))
+- Add image generation to all providers that support it ([#357](https://github.com/0xPlaygrounds/rig/pull/357))
+- *(provider)* cohere-v2 ([#350](https://github.com/0xPlaygrounds/rig/pull/350))
+
+### Fixed
+
+- no params tools definition for Gemini ([#363](https://github.com/0xPlaygrounds/rig/pull/363))
+- *(openai)* serde rename for image_url UserContent ([#355](https://github.com/0xPlaygrounds/rig/pull/355))
+
+### Other
+
+- New model provider: Anthropic Claude 3.7 Addition ([#341](https://github.com/0xPlaygrounds/rig/pull/341))
+- added mcp_tool + Example ([#335](https://github.com/0xPlaygrounds/rig/pull/335))
+
 ## [0.10.0](https://github.com/0xPlaygrounds/rig/compare/rig-core-v0.9.1...rig-core-v0.10.0) - 2025-03-17
 
 ### Added

@@ -26,6 +26,8 @@ use crate::{
     OneOrMany,
 };
 
+use self::gemini_api_types::Schema;
+
 use super::Client;
 
 // =================================================================
@@ -91,11 +93,10 @@ impl completion::CompletionModel for CompletionModel {
 }
 
 pub(crate) fn create_request_body(
-    mut completion_request: CompletionRequest,
+    completion_request: CompletionRequest,
 ) -> Result<GenerateContentRequest, CompletionError> {
     let mut full_history = Vec::new();
-    full_history.append(&mut completion_request.chat_history);
-    full_history.push(completion_request.prompt_with_context());
+    full_history.extend(completion_request.chat_history);
 
     let additional_params = completion_request
         .additional_params
@@ -144,11 +145,17 @@ impl TryFrom<completion::ToolDefinition> for Tool {
     type Error = CompletionError;
 
     fn try_from(tool: completion::ToolDefinition) -> Result<Self, Self::Error> {
+        let parameters: Option<Schema> =
+            if tool.parameters == serde_json::json!({"type": "object", "properties": {}}) {
+                None
+            } else {
+                Some(tool.parameters.try_into()?)
+            };
         Ok(Self {
             function_declarations: FunctionDeclaration {
                 name: tool.name,
                 description: tool.description,
-                parameters: Some(tool.parameters.try_into()?),
+                parameters,
             },
             code_execution: None,
         })
@@ -601,7 +608,7 @@ pub mod gemini_api_types {
         HarmCategoryCivicIntegrity,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Clone, Default)]
     #[serde(rename_all = "camelCase")]
     pub struct UsageMetadata {
         pub prompt_token_count: i32,
@@ -722,7 +729,7 @@ pub mod gemini_api_types {
     /// Gemini API Configuration options for model generation and outputs. Not all parameters are
     /// configurable for every model. From [Gemini API Reference](https://ai.google.dev/api/generate-content#generationconfig)
     /// ### Rig Note:
-    /// Can be used to cosntruct a typesafe `additional_params` in rig::[AgentBuilder](crate::agent::AgentBuilder).
+    /// Can be used to construct a typesafe `additional_params` in rig::[AgentBuilder](crate::agent::AgentBuilder).
     #[derive(Debug, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct GenerationConfig {

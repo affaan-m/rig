@@ -10,8 +10,9 @@
 //! ```
 
 use crate::json_utils::merge;
+use crate::providers::openai;
 use crate::providers::openai::send_compatible_streaming_request;
-use crate::streaming::{StreamingCompletionModel, StreamingResult};
+use crate::streaming::{StreamingCompletionModel, StreamingCompletionResponse};
 use crate::{
     completion::{self, CompletionError, CompletionModel, CompletionRequest},
     extractor::ExtractorBuilder,
@@ -151,7 +152,7 @@ pub enum Message {
         )]
         tool_calls: Vec<ToolCall>,
     },
-    #[serde(rename = "Tool")]
+    #[serde(rename = "tool")]
     ToolResult {
         tool_call_id: String,
         content: String,
@@ -340,7 +341,7 @@ impl TryFrom<CompletionResponse> for completion::CompletionResponse<CompletionRe
                         .iter()
                         .map(|call| {
                             completion::AssistantContent::tool_call(
-                                &call.function.name,
+                                &call.id,
                                 &call.function.name,
                                 call.function.arguments.clone(),
                             )
@@ -379,28 +380,28 @@ impl DeepSeekCompletionModel {
         &self,
         completion_request: CompletionRequest,
     ) -> Result<serde_json::Value, CompletionError> {
-        // Add preamble to chat history (if available)
-        let mut full_history: Vec<Message> = match &completion_request.preamble {
-            Some(preamble) => vec![Message::system(preamble)],
-            None => vec![],
-        };
+        // Build up the order of messages (context, chat_history, prompt)
+        let mut partial_history = vec![];
+        if let Some(docs) = completion_request.normalized_documents() {
+            partial_history.push(docs);
+        }
+        partial_history.extend(completion_request.chat_history);
 
-        // Convert prompt to user message
-        let prompt: Vec<Message> = completion_request.prompt_with_context().try_into()?;
+        // Initialize full history with preamble (or empty if non-existent)
+        let mut full_history: Vec<Message> = completion_request
+            .preamble
+            .map_or_else(Vec::new, |preamble| vec![Message::system(&preamble)]);
 
-        // Convert existing chat history
-        let chat_history: Vec<Message> = completion_request
-            .chat_history
-            .into_iter()
-            .map(|message| message.try_into())
-            .collect::<Result<Vec<Vec<Message>>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        // Combine all messages into a single history
-        full_history.extend(chat_history);
-        full_history.extend(prompt);
+        // Convert and extend the rest of the history
+        full_history.extend(
+            partial_history
+                .into_iter()
+                .map(message::Message::try_into)
+                .collect::<Result<Vec<Vec<Message>>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+        );
 
         let request = if completion_request.tools.is_empty() {
             json!({
@@ -463,13 +464,17 @@ impl CompletionModel for DeepSeekCompletionModel {
 }
 
 impl StreamingCompletionModel for DeepSeekCompletionModel {
+    type StreamingResponse = openai::StreamingCompletionResponse;
     async fn stream(
         &self,
         completion_request: CompletionRequest,
-    ) -> Result<StreamingResult, CompletionError> {
+    ) -> Result<StreamingCompletionResponse<Self::StreamingResponse>, CompletionError> {
         let mut request = self.create_completion_request(completion_request)?;
 
-        request = merge(request, json!({"stream": true}));
+        request = merge(
+            request,
+            json!({"stream": true, "stream_options": {"include_usage": true}}),
+        );
 
         let builder = self.client.post("/v1/chat/completions").json(&request);
         send_compatible_streaming_request(builder).await

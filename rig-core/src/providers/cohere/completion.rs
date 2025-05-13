@@ -6,8 +6,9 @@ use crate::{
 };
 
 use super::client::Client;
+use crate::completion::CompletionRequest;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 pub struct CompletionResponse {
@@ -419,7 +420,7 @@ impl TryFrom<Message> for message::Message {
 
 #[derive(Clone)]
 pub struct CompletionModel {
-    client: Client,
+    pub(crate) client: Client,
     pub model: String,
 }
 
@@ -428,6 +429,50 @@ impl CompletionModel {
         Self {
             client,
             model: model.to_string(),
+        }
+    }
+
+    pub(crate) fn create_completion_request(
+        &self,
+        completion_request: CompletionRequest,
+    ) -> Result<Value, CompletionError> {
+        // Build up the order of messages (context, chat_history)
+        let mut partial_history = vec![];
+        if let Some(docs) = completion_request.normalized_documents() {
+            partial_history.push(docs);
+        }
+        partial_history.extend(completion_request.chat_history);
+
+        // Initialize full history with preamble (or empty if non-existent)
+        let mut full_history: Vec<Message> = completion_request
+            .preamble
+            .map_or_else(Vec::new, |preamble| {
+                vec![Message::System { content: preamble }]
+            });
+
+        // Convert and extend the rest of the history
+        full_history.extend(
+            partial_history
+                .into_iter()
+                .map(message::Message::try_into)
+                .collect::<Result<Vec<Vec<Message>>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+        );
+
+        let request = json!({
+            "model": self.model,
+            "messages": full_history,
+            "documents": completion_request.documents,
+            "temperature": completion_request.temperature,
+            "tools": completion_request.tools.into_iter().map(Tool::from).collect::<Vec<_>>(),
+        });
+
+        if let Some(ref params) = completion_request.additional_params {
+            Ok(json_utils::merge(request.clone(), params.clone()))
+        } else {
+            Ok(request)
         }
     }
 }
@@ -440,51 +485,13 @@ impl completion::CompletionModel for CompletionModel {
         &self,
         completion_request: completion::CompletionRequest,
     ) -> Result<completion::CompletionResponse<CompletionResponse>, CompletionError> {
-        let prompt = completion_request.prompt_with_context();
-
-        let mut messages: Vec<message::Message> =
-            if let Some(preamble) = completion_request.preamble {
-                vec![preamble.into()]
-            } else {
-                vec![]
-            };
-
-        messages.extend(completion_request.chat_history);
-        messages.push(prompt);
-
-        let messages: Vec<Message> = messages
-            .into_iter()
-            .map(|msg| msg.try_into())
-            .collect::<Result<Vec<Vec<_>>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        let request = json!({
-            "model": self.model,
-            "messages": messages,
-            "documents": completion_request.documents,
-            "temperature": completion_request.temperature,
-            "tools": completion_request.tools.into_iter().map(Tool::from).collect::<Vec<_>>(),
-        });
-
+        let request = self.create_completion_request(completion_request)?;
         tracing::debug!(
             "Cohere request: {}",
             serde_json::to_string_pretty(&request)?
         );
 
-        let response = self
-            .client
-            .post("/v2/chat")
-            .json(
-                &if let Some(ref params) = completion_request.additional_params {
-                    json_utils::merge(request.clone(), params.clone())
-                } else {
-                    request.clone()
-                },
-            )
-            .send()
-            .await?;
+        let response = self.client.post("/v2/chat").json(&request).send().await?;
 
         if response.status().is_success() {
             let text_response = response.text().await?;

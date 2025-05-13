@@ -8,8 +8,9 @@
 //!
 //! ```
 use crate::json_utils::merge;
+use crate::providers::openai;
 use crate::providers::openai::send_compatible_streaming_request;
-use crate::streaming::{StreamingCompletionModel, StreamingResult};
+use crate::streaming::{StreamingCompletionModel, StreamingCompletionResponse};
 use crate::{
     agent::AgentBuilder,
     completion::{self, CompletionError, CompletionRequest},
@@ -238,24 +239,25 @@ impl CompletionModel {
             }));
         }
 
-        // Add prompt
-        messages.push(match &completion_request.prompt {
-            Message::User { content } => {
-                let text = content
-                    .iter()
-                    .map(|c| match c {
-                        UserContent::Text(text) => &text.text,
-                        _ => "",
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                serde_json::json!({
-                    "role": "user",
-                    "content": text
+        // Add docs
+        if let Some(Message::User { content }) = completion_request.normalized_documents() {
+            let text = content
+                .into_iter()
+                .filter_map(|doc| match doc {
+                    UserContent::Document(doc) => Some(doc.data),
+                    UserContent::Text(text) => Some(text.text),
+
+                    // This should always be `Document`
+                    _ => None,
                 })
-            }
-            _ => unreachable!(),
-        });
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": text
+            }));
+        }
 
         // Add chat history
         for msg in completion_request.chat_history {
@@ -347,10 +349,11 @@ impl completion::CompletionModel for CompletionModel {
 }
 
 impl StreamingCompletionModel for CompletionModel {
+    type StreamingResponse = openai::StreamingCompletionResponse;
     async fn stream(
         &self,
         completion_request: CompletionRequest,
-    ) -> Result<StreamingResult, CompletionError> {
+    ) -> Result<StreamingCompletionResponse<Self::StreamingResponse>, CompletionError> {
         let mut request = self.create_completion_request(completion_request)?;
 
         request = merge(request, json!({"stream": true}));

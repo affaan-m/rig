@@ -12,11 +12,19 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::str::FromStr;
 
+/// `o4-mini-2025-04-16` completion model
+pub const O4_MINI_2025_04_16: &str = "o4-mini-2025-04-16";
+/// `o4-mini` completion model
+pub const O4_MINI: &str = "o4-mini";
+/// `o3` completion model
+pub const O3: &str = "o3";
 /// `o3-mini` completion model
 pub const O3_MINI: &str = "o3-mini";
 /// `o3-mini-2025-01-31` completion model
 pub const O3_MINI_2025_01_31: &str = "o3-mini-2025-01-31";
-/// 'o1' completion model
+/// `o1-pro` completion model
+pub const O1_PRO: &str = "o1-pro";
+/// `o1`` completion model
 pub const O1: &str = "o1";
 /// `o1-2024-12-17` completion model
 pub const O1_2024_12_17: &str = "o1-2024-12-17";
@@ -28,10 +36,21 @@ pub const O1_PREVIEW_2024_09_12: &str = "o1-preview-2024-09-12";
 pub const O1_MINI: &str = "o1-mini";
 /// `o1-mini-2024-09-12` completion model
 pub const O1_MINI_2024_09_12: &str = "o1-mini-2024-09-12";
+
+/// `gpt-4.1-mini` completion model
+pub const GPT_4_1_MINI: &str = "gpt-4.1-mini";
+/// `gpt-4.1-nano` completion model
+pub const GPT_4_1_NANO: &str = "gpt-4.1-nano";
+/// `gpt-4.1-2025-04-14` completion model
+pub const GPT_4_1_2025_04_14: &str = "gpt-4.1-2025-04-14";
+/// `gpt-4.1` completion model
+pub const GPT_4_1: &str = "gpt-4.1";
 /// `gpt-4.5-preview` completion model
 pub const GPT_4_5_PREVIEW: &str = "gpt-4.5-preview";
 /// `gpt-4.5-preview-2025-02-27` completion model
 pub const GPT_4_5_PREVIEW_2025_02_27: &str = "gpt-4.5-preview-2025-02-27";
+/// `gpt-4o-2024-11-20` completion model (this is newer than 4o)
+pub const GPT_4O_2024_11_20: &str = "gpt-4o-2024-11-20";
 /// `gpt-4o` completion model
 pub const GPT_4O: &str = "gpt-4o";
 /// `gpt-4o-mini` completion model
@@ -158,6 +177,7 @@ pub struct Choice {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum Message {
+    #[serde(alias = "developer")]
     System {
         #[serde(deserialize_with = "string_or_one_or_many")]
         content: OneOrMany<SystemContent>,
@@ -508,7 +528,7 @@ impl TryFrom<Message> for message::Message {
             },
 
             // System messages should get stripped out when converting message's, this is just a
-            // stop gap to avoid obnoxious error handling or panic occuring.
+            // stop gap to avoid obnoxious error handling or panic occurring.
             Message::System { content, .. } => message::Message::User {
                 content: content.map(|content| message::UserContent::text(content.text)),
             },
@@ -605,28 +625,28 @@ impl CompletionModel {
         &self,
         completion_request: CompletionRequest,
     ) -> Result<Value, CompletionError> {
-        // Add preamble to chat history (if available)
-        let mut full_history: Vec<Message> = match &completion_request.preamble {
-            Some(preamble) => vec![Message::system(preamble)],
-            None => vec![],
-        };
+        // Build up the order of messages (context, chat_history)
+        let mut partial_history = vec![];
+        if let Some(docs) = completion_request.normalized_documents() {
+            partial_history.push(docs);
+        }
+        partial_history.extend(completion_request.chat_history);
 
-        // Convert prompt to user message
-        let prompt: Vec<Message> = completion_request.prompt_with_context().try_into()?;
+        // Initialize full history with preamble (or empty if non-existent)
+        let mut full_history: Vec<Message> = completion_request
+            .preamble
+            .map_or_else(Vec::new, |preamble| vec![Message::system(&preamble)]);
 
-        // Convert existing chat history
-        let chat_history: Vec<Message> = completion_request
-            .chat_history
-            .into_iter()
-            .map(|message| message.try_into())
-            .collect::<Result<Vec<Vec<Message>>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        // Combine all messages into a single history
-        full_history.extend(chat_history);
-        full_history.extend(prompt);
+        // Convert and extend the rest of the history
+        full_history.extend(
+            partial_history
+                .into_iter()
+                .map(message::Message::try_into)
+                .collect::<Result<Vec<Vec<Message>>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+        );
 
         let request = if completion_request.tools.is_empty() {
             json!({
